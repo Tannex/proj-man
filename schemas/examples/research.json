@@ -1,0 +1,38 @@
+{
+  "node_types": [
+    {
+      "key": "investigation",
+      "name": "Investigation",
+      "description": "An example custom type for an open question.",
+      "display_property": "summary",
+      "properties": [
+        {"key": "summary", "label": "Summary", "type": "string", "required": true},
+        {"key": "priority", "label": "Priority", "type": "enum", "choices": ["low", "normal", "high"], "default": "normal"},
+        {"key": "estimate", "label": "Estimated hours", "type": "integer", "min": 0},
+        {"key": "due", "label": "Due date", "type": "date"},
+        {"key": "tags", "label": "Tags", "type": "list", "items": "string"}
+      ]
+    },
+    {
+      "key": "deliverable",
+      "name": "Deliverable",
+      "display_property": "label",
+      "properties": [
+        {"key": "label", "type": "string", "required": true},
+        {"key": "accepted", "type": "boolean", "default": false}
+      ]
+    }
+  ],
+  "relationship_types": [
+    {
+      "key": "contains", "name": "Contains", "inverse_name": "Part of",
+      "sources": ["investigation"], "targets": ["investigation", "deliverable"],
+      "family": "breakdown", "acyclic": true, "max_incoming": 1, "ordered": true
+    },
+    {
+      "key": "requires", "name": "Requires", "inverse_name": "Required by",
+      "sources": ["investigation", "deliverable"], "targets": ["investigation", "deliverable"],
+      "family": "dependencies", "acyclic": true
+    }
+  ]
+}

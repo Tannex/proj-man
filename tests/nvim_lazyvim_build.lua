@@ -1,0 +1,8 @@
+local root = assert(vim.env.PROJMAN_TEST_ROOT)
+local specs = dofile(root .. '/nvim/lazyvim.lua')
+specs[1].build()
+assert(vim.fn.executable(root .. '/target/release/projman') == 1)
+vim.opt.runtimepath:prepend(root .. '/nvim')
+assert(require('projman.runtime').command()[1] == root .. '/target/release/projman')
+print('LazyVim build hook passed: release executable built and automatically discovered')
+vim.cmd('qa!')

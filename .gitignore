@@ -1,0 +1,12 @@
+/target/
+/.local/
+*.log
+.env
+.env.*
+!.env.example
+!.env.sample
+/.aws/
+/.codex/
+/.agents/
+__pycache__/
+*.py[cod]
