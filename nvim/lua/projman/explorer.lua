@@ -238,4 +238,9 @@ function M.toggle()
   if s then M.close(s) else M.pick_root() end
 end
 function M.state() return state() end
+function M.editing_window()
+  local s = state()
+  if s and vim.api.nvim_get_current_win() == s.win then return editor(s) end
+  return vim.api.nvim_get_current_win()
+end
 return M

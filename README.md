@@ -48,7 +48,7 @@ vim.opt.runtimepath:append('/absolute/path/to/proj-man/nvim')
 require('projman').setup({}) -- Finds the built executable automatically
 ```
 
-The child process inherits the same `PROJMAN_*` environment variables as the CLI. Commands include `:ProjManExplore`, `:ProjManFind`, `:ProjManTypes`, `:ProjManNew`, `:ProjManSearch`, `:ProjManLink`, `:ProjManLinks`, `:ProjManOutline`, and `:ProjManBacklinks`. Tab and Shift-Tab navigate property values; ordinary editor mappings work in the Markdown body. `:write` is asynchronous and preserves edits typed while a save is pending.
+The child process inherits the same `PROJMAN_*` environment variables as the CLI. Commands include `:ProjManExplore`, `:ProjManFind`, `:ProjManTypes`, `:ProjManNew`, `:ProjManSearch`, `:ProjManLink`, `:ProjManLinks`, `:ProjManOutline`, and `:ProjManBacklinks`. `<leader>Pn` guides node creation and `<leader>Pv` edits properties through typed controls. Tab and Shift-Tab also navigate raw property values; ordinary editor mappings work in the Markdown body. `:write` is asynchronous and preserves edits typed while a save is pending.
 
 See [the CLI and data contract](docs/cli.md), [the Neovim guide](docs/neovim.md), and [the implementation plan](docs/implementation-plan.md), and [verification evidence](docs/verification.md).
 

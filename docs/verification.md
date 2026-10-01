@@ -82,3 +82,14 @@ python3 tests/nvim_save_integration.py
 ```
 
 The complete Rust suite (15 tests), existing CLI suite (14 tests), and Neovim save/recovery/timeout regressions passed after this change.
+
+## Guided Neovim entry
+
+The guided entry checks cover plain text, enum and boolean selections, numeric validation retries, list item controls, schema defaults, cancelled entry, incomplete drafts, and the optional property overview. `tests/nvim_entry.lua` exercises the UI with mocked RPC replies; `tests/guided_entry_integration.py` drives the actual Neovim commands and Rust host against an isolated Neo4j workspace, then checks stored properties and Markdown through a separate CLI process.
+
+```sh
+PROJMAN_TEST_ROOT="$PWD" nvim --headless -u NONE -l tests/nvim_entry.lua
+PROJMAN_NEO4J_URI=bolt://127.0.0.1:17688 python3 tests/guided_entry_integration.py
+```
+
+Both guided suites passed, along with the 15 Rust tests, 14 CLI integration tests, existing Neovim workflow/recovery/timeout checks, and LazyVim loader checks. The workspace build, formatting check, and Clippy check also passed.

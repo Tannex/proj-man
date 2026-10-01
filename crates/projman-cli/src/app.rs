@@ -102,10 +102,22 @@ pub fn query_state(state: &State, method: &str, p: &Value) -> Result<Value> {
         "node.new" => {
             let ty = state.schema()?.node_type(string(p, "type_key")?)?;
             let properties = projman_core::schema::with_defaults(&ty.properties, BTreeMap::new());
+            let missing = projman_core::schema::validate_properties(&ty.properties, &properties)?;
             let text = document::format(ty, &properties, "")?;
             Ok(
-                json!({"id":Uuid::new_v4().to_string(),"type_key":ty.key,"schema_revision":state.schema_revision,"revision":0,"properties":properties,"body":"","text":text,"fields":document::fields(ty,&text)?}),
+                json!({"id":Uuid::new_v4().to_string(),"type_key":ty.key,"type":ty,"schema_revision":state.schema_revision,"revision":0,"properties":properties,"missing":missing,"body":"","text":text,"fields":document::fields(ty,&text)?}),
             )
+        }
+        "property.validate" => {
+            let revision = p.get("schema_revision").and_then(Value::as_u64).unwrap_or(state.schema_revision);
+            let ty = state.schema_at(revision)?.node_type(string(p, "type_key")?)?;
+            let key = string(p, "key")?;
+            let definition = ty.properties.iter().find(|field| field.key == key)
+                .ok_or_else(|| Error::validation(format!("Unknown property '{key}'")))?;
+            let value = p.get("value").cloned().ok_or_else(|| Error::validation("value is required; use null to leave the field unset"))?;
+            let values = BTreeMap::from([(key.to_owned(), value.clone())]);
+            let missing = projman_core::schema::validate_properties(std::slice::from_ref(definition), &values)?;
+            Ok(json!({"key":key,"value":value,"missing":!missing.is_empty()}))
         }
         "node.document" => {
             let node = state.node(string(p, "id")?)?;

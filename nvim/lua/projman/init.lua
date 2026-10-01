@@ -1,7 +1,7 @@
 local rpc = require('projman.rpc')
 local recovery = require('projman.recovery')
 local M = { buffers = {}, history = {} }
-local options = { map_tab = true, recovery_delay = 300, notify_save = true }
+local options = { map_tab = true, recovery_delay = 300, notify_save = true, guided_entry = true, entry_mode = 'prompts' }
 local ns = vim.api.nvim_create_namespace('projman')
 local field_ns = vim.api.nvim_create_namespace('projman-fields')
 local save_ns = vim.api.nvim_create_namespace('projman-save')
@@ -273,6 +273,148 @@ function M.new(type_key, callback)
       select(data.node_types, 'Create node of type', function(t) return t.name .. ' (' .. t.key .. ')' end, function(t) create(t.key) end)
     end)
   end
+end
+local function entry_target(origin)
+  if not vim.api.nvim_win_is_valid(origin) then return end
+  local target = vim.api.nvim_win_call(origin, function() return require('projman.explorer').editing_window() end)
+  local buf = vim.api.nvim_win_get_buf(target)
+  if vim.bo[buf].modified and vim.bo[buf].bufhidden ~= 'hide' and not vim.o.hidden then
+    vim.api.nvim_win_call(target, function() vim.cmd('rightbelow vsplit'); target = vim.api.nvim_get_current_win() end)
+  end
+  return target
+end
+local function notes(buf, win, insert)
+  if not alive(buf) or not vim.api.nvim_win_is_valid(win) or vim.api.nvim_win_get_buf(win) ~= buf then return end
+  local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+  for line = 2, #lines do
+    if lines[line] == '---' then
+      if line == #lines then vim.api.nvim_buf_set_lines(buf, -1, -1, false, { '' }) end
+      vim.api.nvim_win_call(win, function()
+        vim.api.nvim_win_set_cursor(win, { line + 1, 0 }); vim.cmd('normal! zt')
+      end)
+      if insert and vim.api.nvim_get_current_win() == win then vim.cmd('startinsert') end
+      return
+    end
+  end
+end
+function M.create(type_key, raw)
+  ready()
+  if raw or not options.guided_entry then return M.new(type_key) end
+  if M.entry_busy then return notify('Finish or cancel the current entry first') end
+  M.entry_busy = true
+  local origin = vim.api.nvim_get_current_win()
+  local function cancel(err)
+    M.entry_busy = false
+    if err then notify(err) else vim.notify('Node creation cancelled', vim.log.levels.INFO, { title = 'ProjMan' }) end
+  end
+  local function start(key)
+    rpc.request('node.new', { type_key = key }, function(err, seed)
+      if err then cancel(err); return end
+      if not seed.type then cancel('Rebuild the Rust host with :Lazy build projman, then restart Neovim'); return end
+      require('projman.entry').create(seed, { form = options.entry_mode == 'form' }, function(values, cancelled)
+        if cancelled then cancel(); return end
+        local win = entry_target(origin)
+        if not win then cancel('The original editing window was closed'); return end
+        local lines = { '--- projman' }
+        for _, field in ipairs(seed.type.properties) do
+          local value = values[field.key]; if value == nil then value = vim.NIL end
+          lines[#lines + 1] = field.key .. ': ' .. vim.json.encode(value)
+        end
+        lines[#lines + 1] = '---'; lines[#lines + 1] = seed.body or ''
+        seed.properties, seed.text = values, table.concat(lines, '\n')
+        vim.api.nvim_set_current_win(win)
+        local ok, buf = pcall(install, seed, seed.type, true)
+        M.entry_busy = false
+        if not ok then return notify(buf) end
+        notes(buf, win, false)
+        M.save(buf, function(save_err)
+          if save_err then return end -- The completed local draft remains recoverable.
+          if alive(buf) and not vim.bo[buf].modified then notes(buf, win, true) end
+          local node = M.buffers[buf] and M.buffers[buf].node
+          if node then vim.notify('Created ' .. seed.type.name .. (#node.missing > 0 and ' draft (required fields are still missing)' or '') .. '. Write notes; use <leader>Pv to edit properties.', vim.log.levels.INFO, { title = 'ProjMan' }) end
+        end)
+      end)
+    end)
+  end
+  if type_key then start(type_key) else
+    rpc.request('type.list', {}, function(err, data)
+      if err then cancel(err.code == 'not_found' and 'Define a node type with :ProjManTypeNew before creating nodes' or err); return end
+      if #data.node_types == 0 then cancel('Define a node type with :ProjManTypeNew before creating nodes'); return end
+      vim.ui.select(data.node_types, { prompt = 'What would you like to create?', format_item = function(ty) return ty.name .. (ty.description and ty.description ~= '' and (' — ' .. ty.description) or '') end }, function(ty)
+        if ty then start(ty.key) else cancel() end
+      end)
+    end)
+  end
+end
+local function property_rows(buf)
+  local rows, terminator = {}, nil
+  local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+  if lines[1] ~= '--- projman' then return nil, nil, 'The property header is damaged; restore its --- projman opening line' end
+  for line = 2, #lines do
+    if lines[line] == '---' then terminator = line; break end
+    local key, raw = lines[line]:match('^%s*([a-z][a-z0-9_]*)%s*:%s*(.*)$')
+    if key then
+      if rows[key] then return nil, nil, 'Duplicate property ' .. key .. '; correct the header first' end
+      rows[key] = { line = line, raw = raw }
+    end
+  end
+  if not terminator then return nil, nil, 'The property header is missing its closing --- line' end
+  return rows, terminator
+end
+local function field_value(field, raw)
+  if raw == nil or vim.trim(raw) == '' or vim.trim(raw) == 'null' then return vim.NIL end
+  local ok, value = pcall(vim.json.decode, raw)
+  if field.type == 'string' or field.type == 'enum' or field.type == 'date' then
+    return ok and type(value) == 'string' and value or vim.trim(raw)
+  end
+  if ok then return value end
+  return raw
+end
+function M.properties(key, target_buf)
+  local buf, state
+  if target_buf then buf, state = target_buf, M.buffers[target_buf] else buf, state = current() end
+  if not buf or not state or not alive(buf) then return end
+  if state.saving or state.pending then return notify('Resolve the pending save before editing properties') end
+  if state.entry_busy then return notify('Finish or cancel the current property entry first') end
+  local entry = require('projman.entry')
+  local function menu()
+    if not alive(buf) then return end
+    local rows, _, err = property_rows(buf); if err then notify(err); return end
+    local values = object()
+    for _, field in ipairs(state.definition.properties) do values[field.key] = field_value(field, rows[field.key] and rows[field.key].raw) end
+    state.entry_busy = true
+    local title = state.definition.name .. ' · ' .. vim.fn.strcharpart(entry.display(values[state.definition.display_property]), 0, 80)
+    entry.choose_field(state.definition, values, title, nil, function(choice)
+      state.entry_busy = false
+      if not alive(buf) then return end
+      if not choice or choice.close then return end
+      if choice.save then
+        local win = vim.fn.bufwinid(buf)
+        M.save(buf, function(save_err) if not save_err and win ~= -1 then notes(buf, win, false) end end)
+        return
+      end
+      M.properties(choice.field.key, buf)
+    end)
+  end
+  if not key or key == '' then menu(); return end
+  local field
+  for _, item in ipairs(state.definition.properties) do if item.key == key then field = item; break end end
+  if not field then return notify('Unknown property: ' .. key) end
+  local rows, _, err = property_rows(buf); if err then return notify(err) end
+  local original = rows[key] and rows[key].raw
+  state.entry_busy = true
+  entry.ask({ type_key = state.node.type_key, schema_revision = state.node.schema_revision }, field, field_value(field, original), state.definition.name, function(value, cancelled)
+    state.entry_busy = false
+    if cancelled or not alive(buf) then return end
+    local latest, terminator, header_err = property_rows(buf)
+    if header_err then return notify(header_err) end
+    if (latest[key] and latest[key].raw) ~= original then return notify('This property changed while its prompt was open; the newer text has been preserved') end
+    local line = latest[key] and latest[key].line or terminator
+    vim.api.nvim_buf_set_lines(buf, line - 1, latest[key] and line or line - 1, false, { key .. ': ' .. vim.json.encode(value) })
+    save_status(buf, state, 'modified', 'Property updated · :write saves this node')
+    recover_local(buf, state); validate(buf, state)
+    vim.schedule(function() if alive(buf) then menu() end end)
+  end)
 end
 function M.jump(direction)
   local buf, state = current(); if not buf then return end

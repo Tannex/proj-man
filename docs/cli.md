@@ -147,3 +147,7 @@ projman explore ROOT_UUID --family references --include-archived
 `explore` builds a read-only BFS spanning tree. JSON output contains nodes in discovery order, their depth and chosen parent, incoming traversal-edge metadata, and non-tree reference edges. Incoming traversal uses inverse relationship labels. Both-direction traversal emits each canonical edge once. Shared nodes and cycles do not duplicate subtrees or mutate the planning hierarchy.
 
 Optional controls are `--direction outgoing|incoming|both`, `--relation KEY`, `--family FAMILY`, `--max-depth` (0–32; default 3), `--max-nodes` (1–5000; default 500), `--max-references` (0–5000; default 1000), and `--include-archived`. Truncation flags and each node's `more` field identify omitted neighbours. The stdio methods are `node.pick` and `explorer.tree`, using the same option names with underscores and `root` for the selected node UUID.
+
+### Guided editor helpers
+
+The editor's `property.validate` helper accepts `type_key`, `schema_revision`, `key`, and a typed JSON `value` (or `null`). It validates that single field with the existing schema rules and reports whether a required value remains missing. It does not mutate the graph. `node.new` also returns the captured type definition and missing-field list for guided clients. CLI creation and update continue to use the same property validation rules.

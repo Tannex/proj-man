@@ -11,6 +11,7 @@ return {
       'ProjManLinks', 'ProjManLink', 'ProjManOutline', 'ProjManBacklinks', 'ProjManNextField', 'ProjManPreviousField',
       'ProjManRecover', 'ProjManConflict', 'ProjManBack', 'ProjManRetry', 'ProjManReparent', 'ProjManReorder',
       'ProjManReconcile', 'ProjManProposals', 'ProjManReview', 'ProjManUnstage',
+      'ProjManProperties',
     },
     opts = {},
     build = function()
@@ -22,6 +23,7 @@ return {
       { '<leader>Pr', '<cmd>ProjManExplorerRoot<cr>', desc = 'Choose graph root' },
       { '<leader>Pf', '<cmd>ProjManFind<cr>', desc = 'Find node' },
       { '<leader>Pn', '<cmd>ProjManNew<cr>', desc = 'New node' },
+      { '<leader>Pv', '<cmd>ProjManProperties<cr>', desc = 'Edit node properties' },
       { '<leader>Pl', '<cmd>ProjManLink<cr>', desc = 'Link node' },
       { '<leader>PL', '<cmd>ProjManLinks<cr>', desc = 'Node relationships' },
       { '<leader>Pb', '<cmd>ProjManBacklinks<cr>', desc = 'Node backlinks' },

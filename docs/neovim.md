@@ -16,12 +16,22 @@ If you add the runtime path after startup, run `:runtime plugin/projman.lua` onc
 
 ## Editing
 
+The default entry path is guided. Press `<leader>Pn` (or run `:ProjManNew`), choose a custom type, then enter its name/display value and any missing required facts. The prompts follow schema order and retain defaults. Enums and booleans use choices; dates show their expected format; numeric constraints are checked before continuing. On completion the node is saved and the cursor moves to the Markdown notes. Cancelling a prompt creates nothing.
+
+Use `<leader>Pv` / `:ProjManProperties` to see all fields and current values, change one, and choose **Save and return to notes**. Lists have add/edit/remove controls. Property changes are staged in the node buffer, so closing the property menu preserves unsaved work and `:write` still saves the whole node. The notes body is preserved while properties are edited. You can also edit one field directly with `:ProjManProperties status`.
+
+Required facts may be left unset to create an incomplete draft; they are marked in the property list. Validation failures retry the same field. No quotes, JSON arrays, or internal property keys are needed for the guided path.
+
+For a property overview before creation, set `entry_mode = "form"` in `setup` options. For advanced direct buffer entry, use `:ProjManNew!`, or set `guided_entry = false`. Generated property headers remain available above the notes for direct editing.
+
 | Command | Action |
 | --- | --- |
 | `:ProjManTypes` | Edit the workspace schema as JSON |
 | `:ProjManTypeNew` | Add an editable custom node type definition |
 | `:ProjManRelationTypeNew` | Add an editable relationship definition |
-| `:ProjManNew [type_key]` | Create a node from the selected custom type |
+| `:ProjManNew [type_key]` | Guided creation: choose a type, enter missing required facts, then open notes |
+| `:ProjManNew! [type_key]` | Open an unsaved raw draft buffer |
+| `:ProjManProperties [property_key]` | Edit values through typed controls |
 | `:ProjManOpen UUID` | Open a saved node |
 | `:ProjManSearch [text]` | Search titles and Markdown |
 | `:write` | Validate and save the current node, including staged relationships |
@@ -109,7 +119,8 @@ The uppercase `<leader>P` namespace avoids LazyVim's optional lowercase paste ma
 | `<leader>Pe` | Toggle explorer / open root picker |
 | `<leader>Pr` | Choose BFS root |
 | `<leader>Pf` | Find/open node |
-| `<leader>Pn` | New node |
+| `<leader>Pn` | Guided new node |
+| `<leader>Pv` | Guided property editor |
 | `<leader>Pl` / `<leader>PL` | Add link / view relationships |
 | `<leader>Pb` | Backlinks |
 | `<leader>Pt` | Edit custom types |
