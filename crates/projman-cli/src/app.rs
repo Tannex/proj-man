@@ -126,9 +126,8 @@ pub fn query_state(state: &State, method: &str, p: &Value) -> Result<Value> {
                         .unwrap_or(state.schema_revision),
                 )?
                 .node_type(string(p, "type_key")?)?;
-            let doc = document::parse(text)?;
-            let missing =
-                projman_core::schema::validate_properties(&ty.properties, &doc.properties)?;
+            let doc = document::parse_with_schema(ty, text)?;
+            let missing = document::validate(ty, &doc)?;
             Ok(
                 json!({"properties":doc.properties,"body":doc.body,"fields":document::fields(ty,text)?,"missing":missing,"active_schema_revision":state.schema_revision}),
             )

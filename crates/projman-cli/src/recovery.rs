@@ -114,8 +114,16 @@ pub async fn call(config: &Config, method: &str, p: Value) -> Result<Value> {
                 fs::remove_file(path(id)?)?;
                 return Ok(serde_json::to_value(receipt)?);
             }
-            let parsed = document::parse(&recovery.text)?;
             let state = store.read().await?;
+            let schema_revision = state
+                .nodes
+                .get(&recovery.node_id)
+                .map_or(recovery.expected_schema, |node| node.schema_revision);
+            let ty = state
+                .schema_at(schema_revision)?
+                .node_type(&recovery.type_key)?;
+            let parsed = document::parse_with_schema(ty, &recovery.text)?;
+            document::validate(ty, &parsed)?;
             let op = if recovery.expected_revision == 0 {
                 Operation::CreateNode {
                     id: Some(recovery.node_id.clone()),

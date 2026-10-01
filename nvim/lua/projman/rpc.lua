@@ -64,7 +64,9 @@ function M.request(method, params, callback)
   local timer = vim.uv.new_timer()
   M.pending[id] = { callback = callback, timer = timer }
   timer:start(options.timeout, 0, function()
-    finish(id, { code = 'unavailable', message = 'ProjMan request timed out; a write may have committed. Check its operation receipt before retrying.' })
+    local message = 'ProjMan ' .. method .. ' timed out'
+    if method == 'change.apply' or method == 'recovery.restore' then message = message .. '; the write may have committed. Check its operation receipt before retrying.' end
+    finish(id, { code = 'unavailable', message = message })
   end)
   local message = vim.json.encode({ protocol_version = 1, id = id, method = method, params = params or {} })
   local ok = vim.fn.chansend(job, message .. '\n')

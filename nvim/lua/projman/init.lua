@@ -1,8 +1,10 @@
 local rpc = require('projman.rpc')
 local recovery = require('projman.recovery')
 local M = { buffers = {}, history = {} }
-local options = { map_tab = true, recovery_delay = 300 }
+local options = { map_tab = true, recovery_delay = 300, notify_save = true }
 local ns = vim.api.nvim_create_namespace('projman')
+local field_ns = vim.api.nvim_create_namespace('projman-fields')
+local save_ns = vim.api.nvim_create_namespace('projman-save')
 local initialized = false
 local function notify(err)
   if err then vim.notify(type(err) == 'table' and err.message or tostring(err), vim.log.levels.ERROR) end
@@ -40,12 +42,34 @@ local function fields(buf, state)
   return spans
 end
 local function annotations(buf, state)
-  vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
+  vim.api.nvim_buf_clear_namespace(buf, field_ns, 0, -1)
   for _, field in ipairs(fields(buf, state)) do
     if field.required then
-      vim.api.nvim_buf_set_extmark(buf, ns, field.line - 1, 0, { virt_text = { { ' required', 'Comment' } }, virt_text_pos = 'eol' })
+      vim.api.nvim_buf_set_extmark(buf, field_ns, field.line - 1, 0, { virt_text = { { ' required', 'Comment' } }, virt_text_pos = 'eol' })
     end
   end
+end
+local function save_status(buf, state, phase, message)
+  state.save_status = { phase = phase, message = message, revision = state.node.revision }
+  if not alive(buf) then return end
+  vim.b[buf].projman_save_status = state.save_status
+  vim.api.nvim_buf_clear_namespace(buf, save_ns, 0, -1)
+  local highlight = phase == 'error' and 'DiagnosticError' or phase == 'unconfirmed' and 'DiagnosticWarn' or phase == 'saved' and 'DiagnosticOk' or 'DiagnosticInfo'
+  vim.api.nvim_buf_set_extmark(buf, save_ns, 0, 0, { virt_text = { { ' ' .. message:gsub('%c', ' '), highlight } }, virt_text_pos = 'eol' })
+end
+local function save_error(buf, state, err, tick)
+  state.saving, state.error = false, err
+  local unconfirmed = state.pending ~= nil
+  local message = unconfirmed and ('Save outcome unconfirmed: ' .. err.message .. ' Use :ProjManRetry.') or ('Not saved: ' .. err.message)
+  save_status(buf, state, unconfirmed and 'unconfirmed' or 'error', message)
+  if alive(buf) and (not tick or vim.api.nvim_buf_get_changedtick(buf) == tick) and not unconfirmed then
+    local details = type(err.details) == 'table' and err.details or {}
+    local row = math.max(0, math.min((tonumber(details.line) or 1) - 1, vim.api.nvim_buf_line_count(buf) - 1))
+    local line = vim.api.nvim_buf_get_lines(buf, row, row + 1, false)[1] or ''
+    local col = math.max(0, math.min((tonumber(details.column) or 1) - 1, #line))
+    vim.diagnostic.set(ns, buf, { { lnum = row, col = col, message = err.message, severity = vim.diagnostic.severity.ERROR } })
+  end
+  vim.notify(message, unconfirmed and vim.log.levels.WARN or vim.log.levels.ERROR, { title = 'ProjMan' })
 end
 local function validate(buf, state)
   local tick = vim.api.nvim_buf_get_changedtick(buf)
@@ -85,6 +109,9 @@ local function recover_local(buf, state)
   if rpc.workspace then local _, err = recovery.save(recovery_record(buf, state)); if err then notify(err) end end
 end
 local function changed(buf, state)
+  if not state.saving and not state.pending and state.save_status and state.save_status.phase == 'saved' and vim.bo[buf].modified then
+    save_status(buf, state, 'modified', 'Unsaved changes')
+  end
   if state.timer then state.timer:stop(); state.timer:close() end
   state.timer = vim.uv.new_timer()
   state.timer:start(options.recovery_delay, 0, vim.schedule_wrap(function()
@@ -282,13 +309,13 @@ end
 local function apply_pending(buf, state, callback)
   local pending = state.pending
   state.saving = true
+  save_status(buf, state, 'saving', 'Saving…')
   rpc.request('change.apply', pending.request, function(err, receipt)
     state.saving = false
     if not alive(buf) then return end
     if err then
-      state.error = err
       if err.code ~= 'unavailable' and err.code ~= 'io' and err.code ~= 'storage' then state.pending = nil end
-      notify(err)
+      save_error(buf, state, err, pending.tick)
       if callback then callback(err) end
       return
     end
@@ -300,12 +327,18 @@ local function apply_pending(buf, state, callback)
     for i = pending.staged_count + 1, #state.staged do table.insert(remaining, state.staged[i]) end
     state.staged = remaining
     state.node.properties = pending.properties
+    state.node.body = pending.body
+    state.node.missing = pending.missing
     if vim.api.nvim_buf_get_changedtick(buf) == pending.tick and state.generation == pending.generation then
       vim.bo[buf].modified = false
       rpc.request('recovery.remove', { id = state.recovery_id }, function() end)
     else recover_local(buf, state) end
     rpc.request('recovery.remove', { id = pending.recovery_id }, function() end)
     state.pending, state.error = nil, nil
+    local message = 'Saved ' .. state.node.id:sub(1, 8) .. ' (revision ' .. state.node.revision .. ')'
+    if vim.bo[buf].modified then message = message .. '; newer edits remain unsaved' end
+    save_status(buf, state, vim.bo[buf].modified and 'modified' or 'saved', message)
+    if options.notify_save then vim.notify(message, vim.log.levels.INFO, { title = 'ProjMan' }) end
     vim.api.nvim_exec_autocmds('User', { pattern = 'ProjManGraphChanged', modeline = false, data = { graph_revision = receipt.graph_revision } })
     validate(buf, state)
     if callback then callback(nil, receipt) end
@@ -317,11 +350,13 @@ function M.save(buf, callback)
   if state.saving then notify('A save is already in progress'); return end
   if state.pending then notify('A previous save has an unresolved outcome. Use :ProjManRetry or :ProjManConflict.'); return end
   state.saving = true
+  state.error = nil
+  save_status(buf, state, 'saving', 'Saving…')
   local snapshot, tick, generation = text(buf), vim.api.nvim_buf_get_changedtick(buf), state.generation
   local staged = vim.deepcopy(state.staged)
   rpc.request('document.parse', { type_key = state.node.type_key, schema_revision = state.node.schema_revision, text = snapshot }, function(err, parsed)
     if not alive(buf) then return end
-    if err then state.saving = false; state.error = err; notify(err); recover_local(buf, state); if callback then callback(err) end; return end
+    if err then save_error(buf, state, err, tick); recover_local(buf, state); if callback then callback(err) end; return end
     local op
     if state.node.revision == 0 then op = { op = 'create_node', id = state.node.id, type_key = state.node.type_key, properties = parsed.properties, body = parsed.body }
     else
@@ -332,11 +367,11 @@ function M.save(buf, callback)
     local operations = { op }; vim.list_extend(operations, staged)
     local expected = vim.deepcopy(state.expected_nodes); expected[state.node.id] = state.node.revision
     local request = { operation_id = uuid(), expected_schema = state.active_schema, expected_nodes = expected, action = { kind = 'changes', operations = operations } }
-    state.pending = { request = request, text = snapshot, properties = parsed.properties, tick = tick, generation = generation, staged_count = #staged, recovery_id = uuid() }
+    state.pending = { request = request, text = snapshot, properties = parsed.properties, body = parsed.body, missing = parsed.missing, tick = tick, generation = generation, staged_count = #staged, recovery_id = uuid() }
     local _, recovery_err = recovery.save(recovery_record(buf, state, state.pending))
     if recovery_err then
       state.saving = false; state.pending = nil
-      local failure = { code = 'io', message = recovery_err }; notify(failure); if callback then callback(failure) end; return
+      local failure = { code = 'io', message = recovery_err }; save_error(buf, state, failure, tick); if callback then callback(failure) end; return
     end
     apply_pending(buf, state, callback)
   end)

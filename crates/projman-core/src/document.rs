@@ -1,4 +1,4 @@
-use crate::{Error, NodeType, Properties, Result};
+use crate::{Error, NodeType, Properties, Result, ValueType};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
@@ -16,6 +16,16 @@ pub struct Document {
     pub fields: Vec<FieldSpan>,
 }
 pub fn parse(text: &str) -> Result<Document> {
+    parse_header(text, None)
+}
+
+/// Editor input can use bare text for schema-defined textual properties.
+/// Stored/API values stay typed, and the formatter always emits canonical JSON.
+pub fn parse_with_schema(ty: &NodeType, text: &str) -> Result<Document> {
+    parse_header(text, Some(ty))
+}
+
+fn parse_header(text: &str, ty: Option<&NodeType>) -> Result<Document> {
     let mut lines = text.split_inclusive('\n');
     if lines.next().map(|s| s.trim_end_matches(['\r', '\n'])) != Some("--- projman") {
         return Err(Error::validation("Document must begin with '--- projman'")
@@ -48,10 +58,47 @@ pub fn parse(text: &str) -> Result<Document> {
         }
         let leading = value.len() - value.trim_start().len();
         let column = stripped.find(':').unwrap() + 2 + leading;
-        let value: Value = serde_json::from_str(value.trim()).map_err(|e| {
-            Error::validation(format!("{key}: {e}"))
-                .with_details(json!({"line":line_number,"column":column}))
-        })?;
+        let definition = ty
+            .map(|ty| {
+                ty.properties
+                    .iter()
+                    .find(|property| property.key == key)
+                    .ok_or_else(|| {
+                        Error::validation(format!("Unknown property '{key}'"))
+                            .with_details(json!({"field":key,"line":line_number,"column":1}))
+                    })
+            })
+            .transpose()?;
+        let raw = value.trim();
+        let textual = definition.is_some_and(|p| {
+            matches!(
+                p.value_type,
+                ValueType::String | ValueType::Enum | ValueType::Date
+            )
+        });
+        let value: Value = if definition.is_some() && raw.is_empty() {
+            Value::Null
+        } else if textual && raw != "null" && !raw.starts_with('"') {
+            Value::String(raw.into())
+        } else {
+            serde_json::from_str(raw).map_err(|e| {
+                let hint = definition.map(|property| match property.value_type {
+                    ValueType::String | ValueType::Enum | ValueType::Date => {
+                        "Use plain text or a complete double-quoted JSON string"
+                    }
+                    ValueType::Boolean => "Use true, false, or null",
+                    ValueType::Integer => "Use an integer or null",
+                    ValueType::Number => "Use a number or null",
+                    ValueType::List => "Use a JSON array (quote text items) or null",
+                });
+                let message = match hint {
+                    Some(hint) => format!("{key}: {hint}. {e}"),
+                    None => format!("{key}: {e}"),
+                };
+                Error::validation(message)
+                    .with_details(json!({"field":key,"line":line_number,"column":column}))
+            })?
+        };
         properties.insert(key.into(), value);
         fields.push(FieldSpan {
             key: key.into(),
@@ -77,7 +124,7 @@ pub fn format(ty: &NodeType, properties: &Properties, body: &str) -> Result<Stri
     Ok(text)
 }
 pub fn fields(ty: &NodeType, text: &str) -> Result<Vec<FieldSpan>> {
-    let mut fields = parse(text)?.fields;
+    let mut fields = parse_with_schema(ty, text)?.fields;
     for field in &mut fields {
         field.required = ty
             .properties
@@ -92,4 +139,20 @@ pub fn fields(ty: &NodeType, text: &str) -> Result<Vec<FieldSpan>> {
             .unwrap_or(usize::MAX)
     });
     Ok(fields)
+}
+
+/// Locate schema validation errors in the actual editor document, rather than
+/// reporting the JSON decoder's relative "line 1 column 1" position.
+pub fn validate(ty: &NodeType, doc: &Document) -> Result<Vec<String>> {
+    crate::schema::validate_properties(&ty.properties, &doc.properties).map_err(|error| {
+        if let Some(field) = doc
+            .fields
+            .iter()
+            .find(|field| error.message.starts_with(&format!("{}:", field.key)))
+        {
+            error.with_details(json!({"field":field.key,"line":field.line,"column":field.column}))
+        } else {
+            error
+        }
+    })
 }

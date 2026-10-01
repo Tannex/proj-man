@@ -28,11 +28,11 @@ If you add the runtime path after startup, run `:runtime plugin/projman.lua` onc
 | `:ProjManNextField` / `:ProjManPreviousField` | Navigate properties explicitly |
 | `:ProjManBack` | Return to the previous buffer |
 
-Node buffers are named `project://UUID`. The property header follows schema order; required fields are marked and missing values produce diagnostics. Values use JSON syntax: `"text"`, `3`, `true`, `["a", "b"]`, or `null` for an empty value. Everything after the header terminator is free Markdown. Property keys are stable identifiers; display labels and help belong to the schema.
+Node buffers are named `project://UUID`. The property header follows schema order; required fields are marked and missing values produce diagnostics. Text, enum, and date fields accept plain text, such as `name: My task`, `status: in progress`, or `due: 2026-10-01`. Double-quoted JSON strings also work and preserve escapes or intentional surrounding spaces. Numbers, booleans, and lists use JSON syntax: `3`, `true`, or `["a", "b"]`. A blank value or `null` clears a field; use `"null"` to store the literal word. Generated headers still quote text when a node is opened. Everything after the header terminator is free Markdown. Property keys are stable identifiers; display labels and help belong to the schema.
 
 Tab and Shift-Tab move between property values. Completion menus and native snippet navigation take precedence. Outside property values, the existing insert-mode mapping is used. Set `map_tab = false` to keep full control of these keys and use the explicit field commands. `<C-x><C-o>` offers schema enum values. `gf` follows a stable `project://` Markdown mention; elsewhere it uses ordinary file navigation.
 
-Saving is asynchronous. If you type during a save, the acknowledged snapshot becomes the saved base and the newer text stays modified. A failed save leaves your work in the buffer and recovery files. `:wq` may refuse to quit while the asynchronous write completes; then use `:quit` after the buffer becomes unmodified. Forced quitting preserves a local recovery snapshot.
+Saving is asynchronous. The header shows `Saving…`, then the confirmed saved revision or a specific failure. Successful saves also produce a notification (disable with `notify_save = false`). A failed validation marks the offending property line. If you type during a save, the acknowledged snapshot becomes the saved base and the newer text stays modified. A failed save leaves your work in the buffer and recovery files. `:wq` may refuse to quit while the asynchronous write completes; then use `:quit` after the buffer becomes unmodified. Forced quitting preserves a local recovery snapshot.
 
 ## Graph navigation and staged changes
 
@@ -135,3 +135,10 @@ return spec
 ```
 
 `:ProjManHealth` or `:checkhealth projman` checks executable discovery and database connectivity. The plugin does not start containers or change your graph during editor startup.
+
+
+## If a save reports a value parse error
+
+Older builds require every text value to be JSON-quoted. For example, change `name: My task` to `name: "My task"` as an immediate workaround. Updated builds accept plain text for text/enum/date fields. Pull the latest source, run `:Lazy build projman`, and restart Neovim to update both the Lua client and the running Rust host.
+
+A success notification means Neo4j acknowledged the write. `Not saved` means validation or another confirmed failure rejected it; your edits remain in the buffer. `Save outcome unconfirmed` means the host response was lost and the write may have committed—use `:ProjManRetry` to replay its exact operation ID safely.

@@ -145,7 +145,7 @@ estimated_hours: 3
 Free Markdown, including lists, code blocks, and links.
 ```
 
-This is a deliberately restricted header grammar: each property occupies one line and its value is JSON. It is not a general YAML parser. Reject duplicate keys and malformed values; parse only the opening header, leaving later Markdown delimiters alone. The formatter follows schema order, escapes strings, and preserves the body without reformatting it. The example fields belong to an example custom type.
+Each property occupies one header line. The schema determines how values are read: text, enum, and date fields accept plain text or JSON strings, while numbers, booleans, and lists use JSON values. Blank values and `null` represent missing values. The formatter emits canonical JSON values. Reject duplicate keys and malformed values; parse only the opening header, leaving later Markdown delimiters alone. The formatter follows schema order, escapes strings, and preserves the body without reformatting it. The example fields belong to an example custom type.
 
 Tab and Shift+Tab move between property values in schema order. On creation, focus the first missing required value. Mark required properties and offer enum and reference completion. Give active completion and snippet navigation precedence, provide explicit next-field commands, and preserve existing mappings outside property values.
 

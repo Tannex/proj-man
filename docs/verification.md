@@ -67,3 +67,18 @@ PROJMAN_TEST_ROOT="$PWD" nvim --headless -u NONE -l tests/nvim_lazyvim_build.lua
 ```
 
 The database check uses the isolated Neo4j instance from the README. The LazyVim check uses locally installed lazy.nvim and which-key; set `PROJMAN_TEST_LAZY_ROOT` if those packages live outside the usual directory. No plugin downloads are performed by the check.
+
+
+## Neovim write input regression
+
+A real `:write` reproduction with `name: Updated task` produced `name: expected value at line 1 column 1` and left the stored value unchanged. The editor parser now uses the node schema to accept plain text in text, enum, and date fields; structured fields retain JSON parsing and normal validation. Blank values remain incomplete draft facts. The formatter and storage keep canonical typed values.
+
+Three new Rust tests in `crates/projman-core/tests/editor_input.rs` cover plain text, quoted literals, blank fields, preserved Markdown, and exact diagnostics for malformed/invalid typed values. `tests/nvim_save_integration.py` drives the actual `:write` command in standalone Neovim and lazy.nvim, then checks persistence through a separate CLI process. It also covers new nodes, incomplete drafts, recovery, and CLI editor input. The client now shows pending, confirmed, failed, and unconfirmed save outcomes without clearing newer edits.
+
+```sh
+PROJMAN_NEO4J_URI=bolt://127.0.0.1:17688 \
+PROJMAN_TEST_LAZY_ROOT="$HOME/.local/share/nvim/lazy" \
+python3 tests/nvim_save_integration.py
+```
+
+The complete Rust suite (15 tests), existing CLI suite (14 tests), and Neovim save/recovery/timeout regressions passed after this change.
